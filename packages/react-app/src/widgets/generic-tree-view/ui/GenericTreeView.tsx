@@ -14,8 +14,6 @@ import {
   useTransition,
 } from 'react';
 
-import {ProgressRing} from '@qualcomm-ui/react/progress-ring';
-
 import type {
   AnyElementDto,
   CalDataDto,
@@ -338,7 +336,7 @@ function GenericTreeViewInner(
     readOnly = false,
   } = props;
 
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [isExpanding, startExpandTransition] = useTransition();
   const [isSwitchingView, startViewTransition] = useTransition();
   const [pendingSwitch, setPendingSwitch] = useState(false);
@@ -779,14 +777,6 @@ function GenericTreeViewInner(
       className="relative flex h-full w-full flex-col"
       style={{backgroundColor: 'var(--color-surface-primary)'}}
     >
-      {(isPending || isExpanding) && (
-        <div
-          className="absolute inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
-          style={{backgroundColor: 'var(--color-surface-overlay)'}}
-        >
-          <ProgressRing size="xl" />
-        </div>
-      )}
       <ViewSwitchOverlay active={isSwitchingView} switchingTo={switchingTo} />
 
       <div
@@ -801,6 +791,7 @@ function GenericTreeViewInner(
         <Toolbar
           canGet={hasSet || hasDirty}
           canSet={hasDirty && !readOnly}
+          isExpanding={isExpanding}
           onBatchCopy={onBatchCopy ? () => onBatchCopy(activeData) : () => {}}
           onCollapseAll={handleCollapseAll}
           onExpandAll={handleExpandAll}

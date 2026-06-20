@@ -117,7 +117,10 @@ describe('fetchCalData — CKV resolution failure', () => {
     expect(entry.status).toBe('error');
     expect(entry.error).toBe('No CKV found');
     expect(mockGetCalData).not.toHaveBeenCalled();
-    expect(mockShowToast).toHaveBeenCalledWith('No CKV found', 'danger');
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'No calibration data is available for this module. (TestModule)',
+      'danger',
+    );
   });
 });
 
@@ -139,7 +142,10 @@ describe('fetchCalData — GET failure', () => {
     const entry = store.getState().calDataByModuleId[MODULE_ID];
     expect(entry.status).toBe('error');
     expect(entry.error).toBe('Server error');
-    expect(mockShowToast).toHaveBeenCalledWith('Server error', 'danger');
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Failed to load calibration data. (TestModule)',
+      'danger',
+    );
   });
 });
 
@@ -296,7 +302,10 @@ describe('fetchCalData — thrown rejection', () => {
     const entry = store.getState().calDataByModuleId[MODULE_ID];
     expect(entry.status).toBe('error');
     expect(entry.error).toBe('boom');
-    expect(mockShowToast).toHaveBeenCalledWith('boom', 'danger');
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Failed to load calibration data. (TestModule)',
+      'danger',
+    );
   });
 });
 

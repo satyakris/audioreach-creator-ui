@@ -17,6 +17,86 @@ import {logger} from '~shared/lib/logger';
 import type {SliceStatus} from '~shared/store/global-store.types';
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a raw API error string to a user-facing message.
+ * Raw strings like "HTTP error: 500 Internal Server Error" or
+ * "No CKV found for SPF module 0x…" are meaningful to developers but
+ * confusing in a toast. This maps common patterns to plain English.
+ */
+function toUserFriendlyError(raw: string, moduleName: string): string {
+  const suffix = ` (${moduleName})`;
+  if (/HTTP error: 4\d\d/i.test(raw)) {
+    return `Calibration data not found for this module.${suffix}`;
+  }
+  if (/HTTP error: 5\d\d/i.test(raw)) {
+    return `Server error loading calibration data. Try again later.${suffix}`;
+  }
+  if (/no ckv found/i.test(raw)) {
+    return `No calibration data is available for this module.${suffix}`;
+  }
+  if (/request timed out/i.test(raw)) {
+    return `Request timed out. Check your connection and try again.${suffix}`;
+  }
+  if (/network error/i.test(raw)) {
+    return `Network error. Check your connection and try again.${suffix}`;
+  }
+  return `Failed to load calibration data.${suffix}`;
+}
+
+// ---------------------------------------------------------------------------
+// Debug helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * [cal-data-debug] Walk the cal-data DTO and log the control-determining
+ * fields the backend sent for each leaf element (type, displayType, and the
+ * allowedValues used to pick Switch vs Select vs text box). This proves, for
+ * example, whether a boolean "enable" element arrived without the
+ * allowedValues that the Switch control requires. Debug-only; uses a loose
+ * structural shape so it does not couple the slice to the element DTO types.
+ */
+function logCalDataElementShapes(dto: CalDataDto): void {
+  type LooseElement = {
+    allowedValues?: unknown;
+    displayType?: string;
+    name?: string;
+    type?: string;
+    value?: unknown;
+  };
+
+  const walk = (elements: LooseElement[], path: string): void => {
+    for (const elem of elements) {
+      if (elem.type === 'CONFIG_ELEMENT') {
+        logger.info(
+          `[cal-data-debug] element ${path}/${elem.name} ` +
+            `type=CONFIG_ELEMENT displayType=${elem.displayType ?? '<none>'} ` +
+            `allowedValues=${JSON.stringify(elem.allowedValues ?? null)} ` +
+            `value=${JSON.stringify(elem.value)}`,
+          {
+            action: 'logCalDataElementShapes',
+            component: 'calDataSlice',
+            tag: 'cal-data-debug',
+          },
+        );
+      } else if (Array.isArray((elem as {value?: unknown}).value)) {
+        // STRUCT / ELEMENT_TEMPLATE_ARRAY — recurse into child elements.
+        walk(
+          (elem as {value: LooseElement[]}).value,
+          `${path}/${elem.name ?? elem.type}`,
+        );
+      }
+    }
+  };
+
+  for (const param of dto.parameters) {
+    walk(param.elements as unknown as LooseElement[], param.name);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -37,7 +117,7 @@ export interface CalDataSlice {
   fetchCalData: (
     spfModuleSystemId: string,
     moduleName: string,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   setCalDataOpenTab: (spfModuleSystemId: string, tabId: string) => void;
   updateCalData: (
     spfModuleSystemId: string,
@@ -48,6 +128,22 @@ export interface CalDataSlice {
 // ---------------------------------------------------------------------------
 // Slice creator
 // ---------------------------------------------------------------------------
+
+function applyLocalPatch(
+  existingEntry: CalDataEntry,
+  patchPayload: UpdateSpfModuleCalDataRequest,
+): CalDataDto | undefined {
+  if (!existingEntry.dto) {
+    return undefined;
+  }
+  const payloadById = new Map(patchPayload.data.map((p) => [p.parameterId, p]));
+  const patchedParameters = existingEntry.dto.parameters.map((p) =>
+    payloadById.has(p.parameterId)
+      ? {...(payloadById.get(p.parameterId) as typeof p)}
+      : p,
+  );
+  return {...existingEntry.dto, parameters: patchedParameters};
+}
 
 /**
  * Creates the cal-data slice for composing into the GraphDesignerStore.
@@ -61,6 +157,19 @@ export function createCalDataSlice<S extends CalDataSlice>(
   get: StoreApi<S>['getState'],
   projectId: string,
 ): CalDataSlice {
+  const setFetchError = (moduleId: string, errorMsg: string): void => {
+    set({
+      calDataByModuleId: {
+        ...get().calDataByModuleId,
+        [moduleId]: {
+          ...get().calDataByModuleId[moduleId],
+          error: errorMsg,
+          status: 'error',
+        },
+      },
+    } as Partial<S>);
+  };
+
   return {
     calDataByModuleId: {},
 
@@ -86,11 +195,19 @@ export function createCalDataSlice<S extends CalDataSlice>(
     fetchCalData: async (
       spfModuleSystemId: string,
       moduleName: string,
-    ): Promise<void> => {
-      logger.debug('calDataSlice: fetchCalData — loading', {
-        action: 'fetchCalData',
-        component: 'calDataSlice',
-      });
+    ): Promise<boolean> => {
+      // [cal-data-debug] Slice entry — log the IDs the slice received from the UI
+      // and the projectId bound at construction.
+      logger.info(
+        `[cal-data-debug] fetchCalData start ` +
+          `(projectId=${projectId}, spfModuleSystemId=${spfModuleSystemId}, ` +
+          `moduleName=${moduleName})`,
+        {
+          action: 'fetchCalData',
+          component: 'calDataSlice',
+          tag: 'cal-data-debug',
+        },
+      );
 
       const existing = get().calDataByModuleId[spfModuleSystemId];
 
@@ -126,22 +243,26 @@ export function createCalDataSlice<S extends CalDataSlice>(
               component: 'calDataSlice',
               error: errorMsg,
             });
-            set({
-              calDataByModuleId: {
-                ...get().calDataByModuleId,
-                [spfModuleSystemId]: {
-                  ...get().calDataByModuleId[spfModuleSystemId],
-                  error: errorMsg,
-                  status: 'error',
-                },
-              },
-            } as Partial<S>);
-            showToast(errorMsg, 'danger');
-            return;
+            setFetchError(spfModuleSystemId, errorMsg);
+            showToast(toUserFriendlyError(errorMsg, moduleName), 'danger');
+            return false;
           }
 
           ckvSystemId = ckvResult.data;
         }
+
+        // [cal-data-debug] Log the CKV that will be used for the GET, and whether
+        // it was reused from cache or freshly resolved via the query endpoint.
+        logger.info(
+          `[cal-data-debug] fetchCalData resolved ckvSystemId=${ckvSystemId} ` +
+            `(reusedFromCache=${Boolean(existing?.ckvSystemId)}) ` +
+            `spfModuleSystemId=${spfModuleSystemId}`,
+          {
+            action: 'fetchCalData',
+            component: 'calDataSlice',
+            tag: 'cal-data-debug',
+          },
+        );
 
         // GET cal-data
         const result = await getCalData(
@@ -157,18 +278,9 @@ export function createCalDataSlice<S extends CalDataSlice>(
             component: 'calDataSlice',
             error: errorMsg,
           });
-          set({
-            calDataByModuleId: {
-              ...get().calDataByModuleId,
-              [spfModuleSystemId]: {
-                ...get().calDataByModuleId[spfModuleSystemId],
-                error: errorMsg,
-                status: 'error',
-              },
-            },
-          } as Partial<S>);
-          showToast(errorMsg, 'danger');
-          return;
+          setFetchError(spfModuleSystemId, errorMsg);
+          showToast(toUserFriendlyError(errorMsg, moduleName), 'danger');
+          return false;
         }
 
         set({
@@ -184,10 +296,18 @@ export function createCalDataSlice<S extends CalDataSlice>(
           },
         } as Partial<S>);
 
+        // [cal-data-debug] Prove what control-determining fields the backend
+        // sent per element. A boolean element (e.g. "enable") only renders as a
+        // Switch when it carries allowedValues with two boolean-synonym
+        // NAME_VALUE_PAIRs; logging displayType + allowedValues here shows
+        // whether the backend omitted them (forcing a plain text box).
+        logCalDataElementShapes(result.data);
+
         logger.debug('calDataSlice: fetchCalData — ready', {
           action: 'fetchCalData',
           component: 'calDataSlice',
         });
+        return true;
       } catch (error) {
         const errorMsg =
           error instanceof Error ? error.message : 'Unknown error';
@@ -196,17 +316,9 @@ export function createCalDataSlice<S extends CalDataSlice>(
           component: 'calDataSlice',
           error: errorMsg,
         });
-        set({
-          calDataByModuleId: {
-            ...get().calDataByModuleId,
-            [spfModuleSystemId]: {
-              ...get().calDataByModuleId[spfModuleSystemId],
-              error: errorMsg,
-              status: 'error',
-            },
-          },
-        } as Partial<S>);
-        showToast(errorMsg, 'danger');
+        setFetchError(spfModuleSystemId, errorMsg);
+        showToast(toUserFriendlyError(errorMsg, moduleName), 'danger');
+        return false;
       }
     },
 
@@ -238,26 +350,6 @@ export function createCalDataSlice<S extends CalDataSlice>(
         showToast('No cal-data loaded for this module', 'danger');
         return;
       }
-
-      // Helper: build a patched dto by replacing parameters by parameterId.
-      // Returns undefined when the entry has no prior dto to patch against.
-      const applyLocalPatch = (
-        existingEntry: CalDataEntry,
-        patchPayload: UpdateSpfModuleCalDataRequest,
-      ): CalDataDto | undefined => {
-        if (!existingEntry.dto) {
-          return undefined;
-        }
-        const payloadById = new Map(
-          patchPayload.data.map((p) => [p.parameterId, p]),
-        );
-        const patchedParameters = existingEntry.dto.parameters.map((p) =>
-          payloadById.has(p.parameterId)
-            ? {...(payloadById.get(p.parameterId) as typeof p)}
-            : p,
-        );
-        return {...existingEntry.dto, parameters: patchedParameters};
-      };
 
       try {
         const result = await putCalData(

@@ -164,7 +164,7 @@ describe('double-click subsystem saves viewport before consumer callback', () =>
 
     // Fire the onNodeDoubleClick prop with a subsystem-shaped node.
     latestReactFlowProps.current?.onNodeDoubleClick?.(null, {
-      data: {nodeKind: 'subsystem'},
+      data: {label: 'My Subsystem', nodeKind: 'subsystem'},
       id: 'ss-1',
       type: 'subsystem',
     });
@@ -172,7 +172,11 @@ describe('double-click subsystem saves viewport before consumer callback', () =>
     // Viewport must be saved before consumer callback fires.
     expect(callOrder).toEqual(['getViewport', 'onNodeDoubleClick']);
     expect(mockGetViewport).toHaveBeenCalledTimes(1);
-    expect(onNodeDoubleClick).toHaveBeenCalledWith('ss-1');
+    expect(onNodeDoubleClick).toHaveBeenCalledWith(
+      'ss-1',
+      'subsystem',
+      'My Subsystem',
+    );
   });
 
   it('does not call getViewport for non-subsystem nodes', () => {
@@ -185,13 +189,17 @@ describe('double-click subsystem saves viewport before consumer callback', () =>
     );
 
     latestReactFlowProps.current?.onNodeDoubleClick?.(null, {
-      data: {nodeKind: 'module'},
+      data: {label: 'My Module', nodeKind: 'module'},
       id: 'm-1',
       type: 'module',
     });
 
     expect(mockGetViewport).not.toHaveBeenCalled();
-    expect(onNodeDoubleClick).toHaveBeenCalledWith('m-1');
+    expect(onNodeDoubleClick).toHaveBeenCalledWith(
+      'm-1',
+      'module',
+      'My Module',
+    );
   });
 });
 

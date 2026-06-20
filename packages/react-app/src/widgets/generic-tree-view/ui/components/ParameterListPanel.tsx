@@ -11,8 +11,26 @@ import {Tooltip} from '@qualcomm-ui/react/tooltip';
 import {Tree} from '@qualcomm-ui/react/tree';
 
 import type {ParameterDetailDto} from '~entities/spf-module-cal-data';
+import {
+  ConvertNumberToHexString,
+  ConvertStringToNumber,
+} from '~shared/utils/converter-utils';
 
 import {StatusStrip} from './StatusStrip';
+
+/**
+ * Format a parameter id for display as a hex PID with a 0x prefix.
+ * parameterId arrives as a numeric string from the backend; convert it to the
+ * conventional 0x-prefixed hex form. Falls back to the raw value if it is not
+ * a parseable number (so nothing is ever hidden from the user).
+ */
+function formatPid(parameterId: string): string {
+  const asNumber = ConvertStringToNumber(parameterId);
+  if (asNumber === null) {
+    return parameterId;
+  }
+  return ConvertNumberToHexString(asNumber) ?? parameterId;
+}
 
 interface ParameterListPanelProps {
   dirtyParameterIds: Set<string>;
@@ -117,7 +135,7 @@ export function ParameterListPanel({
             const isSet = setParameterIds.has(param.parameterId);
 
             const tooltipLines: string[] = [];
-            tooltipLines.push(`PID: ${param.parameterId}`);
+            tooltipLines.push(`PID: ${formatPid(param.parameterId)}`);
             if (param.description) {
               tooltipLines.push(param.description);
             }
@@ -196,7 +214,7 @@ function ParamRowContent({
           className="shrink-0 font-mono text-xs"
           style={{marginLeft: 'auto', opacity: 0.45, paddingLeft: '8px'}}
         >
-          {param.parameterId}
+          {formatPid(param.parameterId)}
         </span>
       )}
     </>

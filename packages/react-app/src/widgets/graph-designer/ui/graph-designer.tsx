@@ -23,7 +23,12 @@ import {
 } from 'lucide-react';
 
 import {getSystemIdsFromFormattedUsecases} from '~entities/usecases/model/usecase-utils';
-import {useGraphDesignerStoreShallow} from '~features/graph-designer/model/graph-designer-store-context';
+import {CalDataView} from '~features/cal-data-view';
+import {
+  GraphDesignerStoreContext,
+  useGraphDesignerStore,
+  useGraphDesignerStoreShallow,
+} from '~features/graph-designer/model/graph-designer-store-context';
 import {SearchComponent} from '~features/search-component';
 import {
   type UsecaseCategory,
@@ -31,14 +36,18 @@ import {
 } from '~features/usecase-selection';
 import {
   type LevelView,
+  NODE_KIND,
+  type NodeKind,
   type SearchHighlights,
   UsecaseVisualizer,
   type ViewportState,
   type XY,
 } from '~features/usecase-visualizer';
 import {showToast} from '~shared/controls/global-toaster';
+import {PanelIntegration} from '~shared/layout/project-layout-manager';
 import {logger} from '~shared/lib/logger';
 import {useRegisterSideNav, useSideNav} from '~shared/lib/side-nav';
+import {useProjectLayoutStore} from '~shared/store';
 
 import {applyCollapses} from '../lib/apply-collapses';
 import {applyPositionOverrides} from '../lib/apply-position-overrides';
@@ -86,6 +95,9 @@ const GraphDesigner: React.FC<GraphDesignerProps> = ({
   const setLevelView = useGraphDesignerStoreShallow((s) => s.setLevelView);
   const clearLevelView = useGraphDesignerStoreShallow((s) => s.clearLevelView);
 
+  // Store API for imperative action calls and provider value
+  const store = useGraphDesignerStore();
+
   // Collapse, position-override, and viewport state (consumer-owned).
   const [collapseByLevel, setCollapseByLevel] = useState<
     Record<string, Set<number>>
@@ -101,8 +113,7 @@ const GraphDesigner: React.FC<GraphDesignerProps> = ({
   >({});
 
   const levelId = levelView?.levelId ?? '';
-  const collapsedSubgraphs = (collapseByLevel[levelId] ??
-    EMPTY_SET) as Set<number>;
+  const collapsedSubgraphs = collapseByLevel[levelId] ?? EMPTY_SET;
 
   const graph = useMemo<LevelView>(() => {
     if (!levelView) {
@@ -319,8 +330,95 @@ const GraphDesigner: React.FC<GraphDesignerProps> = ({
   const hasSelection = (graph.modules?.length ?? 0) > 0;
   const canUndoRedo = false; // TODO: Support undo/redo stack
 
+  const handleNodeDoubleClick = useCallback(
+    async (nodeId: string, nodeKind: NodeKind, label: string) => {
+      // [cal-data-debug] UI entry boundary — log the raw node identity the
+      // canvas handed us. nodeId IS the spfModuleSystemId used by the API.
+      logger.info(
+        `[cal-data-debug] node double-click ` +
+          `(nodeId/spfModuleSystemId=${nodeId}, nodeKind=${nodeKind}, ` +
+          `label=${label}, projectId=${projectGroupId})`,
+        {
+          action: 'nodeDoubleClick',
+          component: 'GraphDesigner',
+          projectId: projectGroupId,
+          tag: 'cal-data-debug',
+        },
+      );
+      if (nodeKind !== NODE_KIND.MODULE) {
+        logger.info(
+          `[cal-data-debug] ignored — nodeKind '${nodeKind}' is not a module`,
+          {
+            action: 'nodeDoubleClick',
+            component: 'GraphDesigner',
+            tag: 'cal-data-debug',
+          },
+        );
+        return;
+      }
+      const state = store.getState();
+      // Dedup: focus existing tab if already open
+      const existingTabId = state.calDataOpenTabs[nodeId];
+      const layout = useProjectLayoutStore.getState();
+      if (existingTabId) {
+        logger.info(
+          `[cal-data-debug] tab already open for ${nodeId} — focusing, no fetch`,
+          {
+            action: 'nodeDoubleClick',
+            component: 'GraphDesigner',
+            tag: 'cal-data-debug',
+          },
+        );
+        const group = layout.getActiveProjectGroup();
+        if (group) {
+          layout.setActiveProjectTab(group.id, existingTabId);
+        }
+        return;
+      }
+      // Kick off the fetch; only open the tab if it succeeds.
+      const ok = await state.fetchCalData(nodeId, label);
+      if (!ok) {
+        return;
+      }
+      // Re-check after async gap — a concurrent double-click may have already
+      // opened the tab while the fetch was in flight.
+      const existingAfterFetch = store.getState().calDataOpenTabs[nodeId];
+      if (existingAfterFetch) {
+        const groupAfter = useProjectLayoutStore
+          .getState()
+          .getActiveProjectGroup();
+        if (groupAfter) {
+          useProjectLayoutStore
+            .getState()
+            .setActiveProjectTab(groupAfter.id, existingAfterFetch);
+        }
+        return;
+      }
+      // Open a new project tab with CalDataView wrapped in the store provider
+      const tab = PanelIntegration.createProjectTab(
+        label,
+        <GraphDesignerStoreContext.Provider value={store}>
+          <CalDataView spfModuleSystemId={nodeId} />
+        </GraphDesignerStoreContext.Provider>,
+        () => true,
+        () => {
+          store.getState().clearCalData(nodeId);
+        },
+      );
+      store.getState().setCalDataOpenTab(nodeId, tab.id);
+      // Focus the newly opened tab — createProjectTab appends it but does not
+      // activate it, so without this the focus stays on the graph-designer tab.
+      const group = layout.getActiveProjectGroup();
+      if (group) {
+        layout.setActiveProjectTab(group.id, tab.id);
+      }
+    },
+    [store, projectGroupId],
+  );
+
   const eventHandlers = useMemo(
     () => ({
+      onNodeDoubleClick: handleNodeDoubleClick,
       onNodeDragEnd: ({
         nodeId,
         position,
@@ -355,7 +453,7 @@ const GraphDesigner: React.FC<GraphDesignerProps> = ({
         setViewportByLevel((p) => ({...p, [levelId]: viewport}));
       },
     }),
-    [levelId],
+    [handleNodeDoubleClick, levelId],
   );
 
   const sideNavItems = useMemo(

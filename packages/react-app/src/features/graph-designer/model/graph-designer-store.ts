@@ -39,6 +39,7 @@ import {
   type VisualizerSlice,
 } from '~shared/store/tab-store-slices/visualizer-slice';
 
+import {type CalDataSlice, createCalDataSlice} from './cal-data-slice';
 import {createGraphDataSlice, type GraphDataSlice} from './graph-data-slice';
 import {createKeyConfigSlice, type KeyConfigSlice} from './key-config-slice';
 import {createModuleListSlice, type ModuleListSlice} from './module-list-slice';
@@ -60,7 +61,8 @@ export type GraphDesignerStore = UsecaseSelectionSlice &
   PropertiesViewSlice &
   PanelLayoutSlice &
   PanelTabRegistrySlice &
-  SearchSlice;
+  SearchSlice &
+  CalDataSlice;
 
 // ── Factory ─────────────────────────────────────────────────────────────────
 
@@ -80,6 +82,7 @@ export function createGraphDesignerStore(
     ...createValidationResultSlice(set, get),
     ...createModuleListSlice(set, get, projectId),
     ...createSubgraphListSlice(set, get, projectId),
+    ...createCalDataSlice(set, get, projectId),
     ...createPropertiesViewSlice(set),
     ...createPanelLayoutSlice(set),
     ...createPanelTabRegistrySlice(set),

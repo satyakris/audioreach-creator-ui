@@ -38,7 +38,7 @@ export interface RequestOverrides {
   timeoutMs?: number;
 }
 
-type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
 interface RequestOptions extends RequestOverrides {
   body?: unknown;
@@ -129,6 +129,26 @@ export class HttpClient {
         ...(overrides?.headers ?? {}),
       },
       method: 'PATCH',
+      retries: overrides?.retries,
+      retryBaseDelayMs: overrides?.retryBaseDelayMs,
+      retryJitterMs: overrides?.retryJitterMs,
+      timeoutMs: overrides?.timeoutMs,
+    });
+  }
+
+  async put<T>(
+    endpoint: string,
+    body?: unknown,
+    overrides?: RequestOverrides,
+  ): Promise<ApiResult<T>> {
+    return this.request<T>(endpoint, {
+      apiVersion: overrides?.apiVersion,
+      body,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(overrides?.headers ?? {}),
+      },
+      method: 'PUT',
       retries: overrides?.retries,
       retryBaseDelayMs: overrides?.retryBaseDelayMs,
       retryJitterMs: overrides?.retryJitterMs,

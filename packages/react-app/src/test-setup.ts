@@ -19,11 +19,27 @@ import type * as VisualizerStoreContext from '~features/usecase-visualizer/model
 
 // Suppress console warnings in tests (optional)
 const originalError = console.error;
+// Known QUI library bugs: custom props forwarded to native DOM elements.
+// Match only args[0] — React 19 passes the static format string there; the
+// dynamic prop name arrives in args[1] which we don't need to inspect.
+const QUI_PROP_LEAK_PATTERNS = [
+  /React does not recognize the `%s` prop on a DOM element/,
+  /Received `%s` for a non-boolean attribute `%s`/,
+  /Unknown event handler property `%s`\. It will be ignored/,
+];
+function isQuiPropLeak(args: unknown[]): boolean {
+  const first = args[0];
+  return (
+    typeof first === 'string' &&
+    QUI_PROP_LEAK_PATTERNS.some((re) => re.test(first))
+  );
+}
 beforeAll(() => {
   console.error = (...args) => {
     if (
       typeof args[0] === 'string' &&
-      args[0].includes('Warning: ReactDOM.render is deprecated')
+      (args[0].includes('Warning: ReactDOM.render is deprecated') ||
+        isQuiPropLeak(args))
     ) {
       return;
     }
@@ -58,6 +74,7 @@ jest.mock('@qualcomm-ui/react/text-input', () => ({
       placeholder,
       readOnly,
       size,
+      startIcon: _startIcon,
       style,
       value,
       ...restProps
@@ -148,7 +165,17 @@ jest.mock('@qualcomm-ui/react/button', () => ({
   Button: jest
     .fn()
     .mockImplementation(
-      ({children, className, disabled, onClick, type = 'button', ...props}) => {
+      ({
+        children,
+        className,
+        disabled,
+        fullWidth: _fw,
+        onClick,
+        size: _size,
+        type = 'button',
+        variant: _variant,
+        ...props
+      }) => {
         return createElement(
           'button',
           {
@@ -171,7 +198,10 @@ jest.mock('@qualcomm-ui/react/button', () => ({
         children,
         className,
         disabled,
+        fullWidth: _fw,
         onClick,
+        size: _size,
+        variant: _variant,
         ...props
       }) => {
         return createElement(
@@ -635,13 +665,17 @@ jest.mock('@qualcomm-ui/react/popover', () => ({
         children,
       );
     }),
-    Root: jest.fn().mockImplementation(({children, open, ...props}) => {
-      return createElement(
-        'div',
-        {'data-open': open, 'data-testid': 'popover-root', ...props},
-        children,
-      );
-    }),
+    Root: jest
+      .fn()
+      .mockImplementation(
+        ({children, onOpenChange: _onOpenChange, open, ...props}) => {
+          return createElement(
+            'div',
+            {'data-open': open, 'data-testid': 'popover-root', ...props},
+            children,
+          );
+        },
+      ),
     Trigger: jest.fn().mockImplementation(({children, ...props}) => {
       // Handle render prop pattern
       if (typeof children === 'function') {

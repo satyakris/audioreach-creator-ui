@@ -69,10 +69,9 @@ export function SubgraphNode({data: node, selected}: SubgraphNodeProps) {
         data-testid="subgraph-header"
       >
         <span className="text-primary flex items-center gap-1 truncate text-xs font-semibold">
-          {node.label}
           {showSubgraphId ? (
             <span className="text-secondary" data-testid="subgraph-id">
-              {`#${ConvertNumberToHexString(node.subgraphId) ?? node.subgraphId}`}
+              {`Subgraph: ${ConvertNumberToHexString(node.subgraphId) ?? node.subgraphId}`}
             </span>
           ) : null}
         </span>

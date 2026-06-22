@@ -124,12 +124,7 @@ export function useProjectOpener({
     const mainTab = PanelIntegration.createProjectMainTab(
       project.filepath,
       mainTabId,
-      () => {
-        unsubscribeLogEvents?.();
-        tabStoreRegistry.destroyTabStore(mainTabId);
-        projectStoreRegistry.remove(project.id);
-        return true;
-      },
+      () => true,
       (node: any) => {
         const component = node.getComponent();
         const name =
@@ -212,6 +207,18 @@ export function useProjectOpener({
       .registerProjectGroup(project.id, project.filepath);
     useGlobalStore.getState().setActiveProject(project.id);
 
+    // Wrap the lifecycle callback so confirmed close also tears down the
+    // per-project resources created in this scope.
+    const onClose = async (projectId: string, projectName: string) => {
+      const confirmed = await onProjectClose(projectId, projectName);
+      if (confirmed) {
+        unsubscribeLogEvents?.();
+        tabStoreRegistry.destroyTabStore(mainTabId);
+        useGlobalStore.getState().removeProjectGroup(projectId);
+      }
+      return confirmed;
+    };
+
     // Create the project group in layout store with screenshot callback
     layoutStore.createProjectGroup(
       project.id,
@@ -219,7 +226,7 @@ export function useProjectOpener({
       project.name,
       mainTab,
       project.description,
-      onProjectClose, // onClose callback - captures screenshot before unmount
+      onClose, // onClose callback - captures screenshot before unmount
     );
 
     // Notify parent component
@@ -277,7 +284,9 @@ export function useProjectOpener({
     });
 
     try {
-      const result = await ProjectService.openWorkspaceProjectFromFile();
+      const result = await ProjectService.openWorkspaceProjectFromFile(
+        (message) => setLoadingState({isLoading: true, message}),
+      );
 
       // User cancelled - not an error
       if (!result.success && result.message === 'File selection cancelled') {
@@ -289,19 +298,6 @@ export function useProjectOpener({
       }
 
       if (result.success && result.project) {
-        setLoadingState({
-          isLoading: true,
-          message: 'Processing AWSP/ACDB files in the project ...',
-        });
-
-        // Small delay to show the processing message
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        setLoadingState({
-          isLoading: true,
-          message: 'Loading project data...',
-        });
-
         await handleProjectOpenSuccess(
           result.project,
           result.usecaseData || [],

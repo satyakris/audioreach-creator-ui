@@ -22,6 +22,7 @@ import {
 import {logger} from '~shared/lib/logger';
 
 import {containerNodeId, subgraphNodeId} from './node-id';
+import {ConvertNumberToHexString} from '~shared/utils/converter-utils';
 
 function resolveModuleShape(name: string): ModuleShape | undefined {
   const t = name.toLowerCase();
@@ -119,7 +120,7 @@ export function buildLevelViewFromGraphData(
       containerId: Number(m.containerId),
       height: 0,
       id: key,
-      label: `Container ${m.containerId}`,
+      label: `Container: ${ConvertNumberToHexString(Number(m.containerId))}`,
       nodeKind: NODE_KIND.CONTAINER,
       parentId: subgraphNodeId(m.subgraphId),
       width: 0,

@@ -25,7 +25,10 @@ import {
   type SubgraphProxyNode,
 } from '~features/usecase-visualizer';
 
-const subgraphProxyId = (sgId: number): string => `subgraph-proxy-${sgId}`;
+import {ConvertNumberToHexString} from '~shared/utils/converter-utils';
+
+const subgraphProxyId = (sgId: number): string =>
+  `subgraph-${ConvertNumberToHexString(sgId)}`;
 
 interface CollapseContext {
   /** node id → collapsed subgraphId that contains it (proxy target). */
@@ -48,6 +51,10 @@ function buildCollapseContext(
       if (collapsed.has(sgId)) {
         containerToSubgraph.set(c.id, sgId);
         insideNodeToSubgraph.set(c.id, sgId);
+        // layoutLevelView rebinds module parentIds to logicalContainerId — index both.
+        if (c.logicalContainerId) {
+          containerToSubgraph.set(c.logicalContainerId, sgId);
+        }
       }
     }
   }
@@ -229,7 +236,7 @@ export function applyCollapses(
   const newProxies: SubgraphProxyNode[] = collapsedSubgraphs.map((sg) => ({
     height: NODE_DIMENSIONS.subgraphProxy.height,
     id: subgraphProxyId(sg.subgraphId),
-    label: sg.label,
+    label: subgraphProxyId(sg.subgraphId),
     nodeKind: 'subgraph-proxy',
     parentId: sg.parentId,
     ports: Array.from(proxyPorts.get(sg.subgraphId)?.values() ?? []),

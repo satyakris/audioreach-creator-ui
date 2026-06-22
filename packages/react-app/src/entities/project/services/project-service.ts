@@ -108,9 +108,12 @@ export class ProjectService {
 
   /**
    * Opens a workspace project using file picker
+   * @param onProgress - Optional callback to report status updates during the operation
    * @returns Promise with project open result
    */
-  static async openWorkspaceProjectFromFile(): Promise<ProjectOpenResponse> {
+  static async openWorkspaceProjectFromFile(
+    onProgress?: (message: string) => void,
+  ): Promise<ProjectOpenResponse> {
     if (!electronApi) {
       logger.error('Electron API not available', {
         action: 'open_workspace_project',
@@ -176,6 +179,7 @@ export class ProjectService {
       );
 
       // Call the backend API to upload and open the project
+      onProgress?.('Processing AWSP/ACDB files in the project...');
       const result = await openWorkspaceProject(
         acdbFile,
         workspaceFile,
@@ -206,6 +210,7 @@ export class ProjectService {
       };
 
       // Fetch usecase data for the project
+      onProgress?.('Loading project data...');
       const usecaseData = await this.fetchUsecaseData(project.id);
 
       return {

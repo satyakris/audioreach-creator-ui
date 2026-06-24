@@ -39,8 +39,9 @@ export class ProjectImageService {
       const imageData = await screenshotFn();
 
       if (imageData) {
-        // Save to MRU in background (non-blocking)
-        await window.mruStoreApi.updateProjectImage(projectId, imageData);
+        // Fire-and-forget: MRU image write does not need to complete before
+        // the project component unmounts.
+        void window.mruStoreApi.updateProjectImage(projectId, imageData);
 
         logger.info('Project screenshot saved to MRU', {
           action: 'save_screenshot',

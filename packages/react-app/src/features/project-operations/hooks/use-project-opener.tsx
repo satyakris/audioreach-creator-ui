@@ -123,7 +123,7 @@ export function useProjectOpener({
 
     const mainTab = PanelIntegration.createProjectMainTab(
       project.filepath,
-      mainTabId,
+      'Graph Designer',
       () => true,
       (node: any) => {
         const component = node.getComponent();

@@ -38,41 +38,32 @@ export function useProjectLifecycle(): ProjectLifecycleHook {
     try {
       const screenshotFn = screenshotRegistryRef.current.get(projectId);
 
-      if (screenshotFn) {
-        // Capture screenshot BEFORE component unmounts
-        await ProjectImageService.captureAndSave(projectId, screenshotFn);
-      }
+      // Screenshot capture and config archive are independent — run in parallel.
+      await Promise.all([
+        screenshotFn
+          ? ProjectImageService.captureAndSave(projectId, screenshotFn)
+          : Promise.resolve(),
+        ConfigFileManager.instance.archiveProjectConfig(projectId).then(
+          (saved) => {
+            if (!saved) {
+              logger.warn('Failed to archive project configuration', {
+                action: 'close_project',
+                component: 'useProjectLifecycle',
+                projectId,
+              });
+            }
+          },
+        ),
+      ]);
     } catch (error) {
-      logger.error('Failed to capture screenshot during project close', {
+      logger.error('Failed during project close', {
         action: 'close_project',
         component: 'useProjectLifecycle',
         error: error instanceof Error ? error.message : String(error),
         projectId,
       });
-      // Don't block close on screenshot failure
-    }
-
-    // Save project configuration
-    try {
-      const saved =
-        await ConfigFileManager.instance.archiveProjectConfig(projectId);
-      if (!saved) {
-        logger.warn('Failed to archive project configuration', {
-          action: 'close_project',
-          component: 'useProjectLifecycle',
-          projectId,
-        });
-      }
-    } catch (error) {
-      logger.error('Failed to save project configuration during close', {
-        action: 'close_project',
-        component: 'useProjectLifecycle',
-        error: error instanceof Error ? error.message : String(error),
-        projectId,
-      });
-      // Don't block close on config save failure
+      // Don't block close on failure
     } finally {
-      // Cleanup registry
       screenshotRegistryRef.current.delete(projectId);
     }
 

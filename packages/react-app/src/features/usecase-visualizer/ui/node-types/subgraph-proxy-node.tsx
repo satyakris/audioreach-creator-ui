@@ -55,6 +55,7 @@ export function SubgraphProxyNode({
             ? highlight.activeBackgroundColor
             : 'var(--color-background-neutral-04)',
         borderColor,
+        borderWidth: highlight.borderWidth ?? '2px',
         height: '100%',
         width: '100%',
       }}

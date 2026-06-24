@@ -26,6 +26,11 @@ const formatUsecaseDisplay = (usecase: Usecase): string => {
     .join(' • ');
 };
 
+// Module-level guard: tracks which projects have already had their default
+// usecase selection applied. A component-local ref would reset on every
+// remount (tab switch), causing defaults to override the user's selections.
+const defaultSelectionAppliedProjects = new Set<string>();
+
 interface UsecaseSelectionControlProps {
   onSelectedUsecasesChange: (usecases: string[]) => void;
   projectId: string;
@@ -57,6 +62,34 @@ const UsecaseSelectionControl: React.FC<UsecaseSelectionControlProps> = ({
   };
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (defaultSelectionAppliedProjects.has(projectId)) return;
+    defaultSelectionAppliedProjects.add(projectId);
+
+    const initialSelected = usecaseData
+      .flatMap((cat) => cat.usecases)
+      .filter((usecase) => {
+        const valueLabels = usecase.keyValueCollection.map((kv: KeyValue) =>
+          kv.valueInfo.valueLabel.toLowerCase(),
+        );
+        const hasCompressOffloadPlayback = valueLabels.some((v) =>
+          v.includes('compress_offload_playback'),
+        );
+        const hasTargetDevice = valueLabels.some(
+          (v) =>
+            v.includes('speaker') ||
+            v.includes('headphones') ||
+            v.includes('handset'),
+        );
+        return hasCompressOffloadPlayback && hasTargetDevice;
+      })
+      .map(formatUsecaseDisplay);
+
+    if (initialSelected.length > 0) {
+      onSelectedUsecasesChange(initialSelected);
+    }
+  }, [onSelectedUsecasesChange, usecaseData]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

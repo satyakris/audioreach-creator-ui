@@ -34,10 +34,19 @@ import type {
   TagDataDto,
   TagInfoDto,
 } from '~entities/spf-module-data';
+import {PARAM_ID_MODULE_ENABLE_SYSTEM_ID} from '~features/graph-designer/lib/module-enable.constants';
+import type {
+  GraphDataSlice,
+  ModuleInstance,
+} from '~features/graph-designer/model/graph-data-slice';
 import {
   createModuleDataSlice,
   type ModuleDataSlice,
 } from '~features/graph-designer/model/module-data-slice';
+import {
+  createSubgraphHeaderSelectionSlice,
+  type SubgraphHeaderSelectionSlice,
+} from '~features/graph-designer/model/subgraph-header-selection-slice';
 
 const PROJECT_ID = 'proj-1';
 const MODULE_ID = 'mod-1';
@@ -47,6 +56,70 @@ function makeStore() {
   return createStore<ModuleDataSlice>((set, get) =>
     createModuleDataSlice(set, get, PROJECT_ID),
   );
+}
+
+type TestStore = ModuleDataSlice &
+  GraphDataSlice &
+  SubgraphHeaderSelectionSlice;
+
+function makeWidenedStore(options: {
+  headerSelectionsBySubgraphId?: SubgraphHeaderSelectionSlice['headerSelectionsBySubgraphId'];
+  moduleInstances?: Record<string, ModuleInstance>;
+}) {
+  const store = createStore<TestStore>((set, get) => ({
+    ...createModuleDataSlice(set, get, PROJECT_ID),
+    ...createSubgraphHeaderSelectionSlice(set, get),
+    clearGraphData: () => {},
+    graphData: {
+      connections: [],
+      containers: {},
+      moduleInstances: options.moduleInstances ?? {},
+      selectedUsecases: [],
+      subgraphs: {},
+      subsystems: {},
+    },
+    graphDataError: null,
+    graphDataStatus: 'ready',
+    isDirty: false,
+    loadGraphData: async () => {},
+    markClean: () => {},
+    markDirty: () => {},
+  }));
+  if (options.headerSelectionsBySubgraphId) {
+    store.setState({
+      headerSelectionsBySubgraphId: options.headerSelectionsBySubgraphId,
+    });
+  }
+  return store;
+}
+
+function makeModuleInstance(
+  overrides?: Partial<ModuleInstance>,
+): ModuleInstance {
+  return {
+    containerId: 'cnt-1',
+    displayName: 'Module',
+    inputPorts: [],
+    moduleId: 'mod-def-1',
+    moduleInstanceId: MODULE_ID,
+    moduleName: MODULE_NAME,
+    moduleType: '',
+    outputPorts: [],
+    position: {x: 0, y: 0},
+    subgraphId: 'sg-1',
+    ...overrides,
+  };
+}
+
+function makeCkv(systemId: string, keyValues: [string, string][]): CkvDto {
+  return {
+    keyValueCollection: keyValues.map(([keySystemId, valueSystemId]) => ({
+      keyInfo: {keyId: 0, keyLabel: keySystemId, keySystemId},
+      valueInfo: {valueId: 0, valueLabel: valueSystemId, valueSystemId},
+    })),
+    supportedParameters: [],
+    systemId,
+  };
 }
 
 function makeCalDataDto(overrides?: Partial<CalDataDto>): CalDataDto {
@@ -351,6 +424,183 @@ describe('createModuleDataSlice — updateCalData', () => {
 
     resolvePut({data: makeCalDataDto(), message: undefined, success: true});
     await firstSet;
+  });
+});
+
+describe('createModuleDataSlice — setModuleEnable', () => {
+  const ENABLE_ELEMENT = {
+    allowedValues: [
+      {name: 'Enable', type: 'NAME_VALUE_PAIR' as const, value: '0x1'},
+      {name: 'Disable', type: 'NAME_VALUE_PAIR' as const, value: '0x0'},
+    ],
+    isReadOnly: false,
+    name: 'Enable',
+    type: 'CONFIG_ELEMENT' as const,
+    value: '0x0',
+  };
+  const OTHER_ELEMENT = {
+    isReadOnly: false,
+    name: 'Gain',
+    type: 'CONFIG_ELEMENT' as const,
+    value: '10',
+  };
+
+  function makeCalDataDtoWithEnable(): CalDataDto {
+    return makeCalDataDto({
+      parameters: [
+        {
+          changeInfo: {changeType: 'NONE'},
+          elements: [ENABLE_ELEMENT],
+          name: 'Enable',
+          parameterId: '0x8001026',
+          systemId: PARAM_ID_MODULE_ENABLE_SYSTEM_ID,
+        },
+        {
+          changeInfo: {changeType: 'NONE'},
+          elements: [OTHER_ELEMENT],
+          name: 'Gain',
+          parameterId: '0x8001099',
+          systemId: 'PARAM_ID_GAIN_SYS_ID',
+        },
+      ],
+    });
+  }
+
+  it('PUTs a single-item payload filtered to the enable param and merges the response by parameterId', async () => {
+    const store = makeWidenedStore({
+      headerSelectionsBySubgraphId: {
+        'sg-1': {keyValues: {'key-1': 'v1'}, subgraphId: 'sg-1'},
+      },
+      moduleInstances: {
+        [MODULE_ID]: makeModuleInstance({
+          ckvs: [makeCkv('ckv-1', [['key-1', 'v1']])],
+        }),
+      },
+    });
+    store.setState({
+      moduleDataByModuleId: {
+        [MODULE_ID]: {
+          calData: {
+            availableCalIndices: [],
+            dto: makeCalDataDtoWithEnable(),
+            loadedScope: 'partial',
+            status: 'ready',
+          },
+          moduleName: MODULE_NAME,
+        },
+      },
+    });
+    mockPutCalData.mockResolvedValueOnce({
+      data: makeCalDataDto({
+        parameters: [
+          {
+            changeInfo: {changeType: 'UPDATE'},
+            elements: [{...ENABLE_ELEMENT, value: '0x1'}],
+            name: 'Enable',
+            parameterId: '0x8001026',
+            systemId: PARAM_ID_MODULE_ENABLE_SYSTEM_ID,
+          },
+        ],
+      }),
+      message: undefined,
+      success: true,
+    });
+
+    await store.getState().setModuleEnable(MODULE_ID, true);
+
+    expect(mockPutCalData).toHaveBeenCalledWith(
+      PROJECT_ID,
+      MODULE_ID,
+      'ckv-1',
+      {
+        data: [
+          expect.objectContaining({
+            elements: [{...ENABLE_ELEMENT, value: '0x1'}],
+            parameterId: '0x8001026',
+          }),
+        ],
+      },
+      [PARAM_ID_MODULE_ENABLE_SYSTEM_ID],
+    );
+    expect(mockPutCalData.mock.calls[0][3].data).toHaveLength(1);
+
+    const entry = store.getState().moduleDataByModuleId[MODULE_ID];
+    const parameters = entry.calData?.dto?.parameters ?? [];
+    expect(parameters).toHaveLength(2);
+    expect(
+      parameters.find((p) => p.parameterId === '0x8001026')?.elements[0],
+    ).toEqual({...ENABLE_ELEMENT, value: '0x1'});
+    expect(parameters.find((p) => p.parameterId === '0x8001099')).toEqual(
+      expect.objectContaining({elements: [OTHER_ELEMENT], name: 'Gain'}),
+    );
+  });
+
+  it('aborts before calling putCalData when the active CKV is unresolved', async () => {
+    const store = makeWidenedStore({
+      headerSelectionsBySubgraphId: {
+        'sg-1': {keyValues: {'key-1': 'NA'}, subgraphId: 'sg-1'},
+      },
+      moduleInstances: {
+        [MODULE_ID]: makeModuleInstance({
+          ckvs: [makeCkv('ckv-1', [['key-1', 'v1']])],
+        }),
+      },
+    });
+    store.setState({
+      moduleDataByModuleId: {
+        [MODULE_ID]: {
+          calData: {
+            availableCalIndices: [],
+            dto: makeCalDataDtoWithEnable(),
+            loadedScope: 'partial',
+            status: 'ready',
+          },
+          moduleName: MODULE_NAME,
+        },
+      },
+    });
+
+    await store.getState().setModuleEnable(MODULE_ID, true);
+
+    expect(mockPutCalData).not.toHaveBeenCalled();
+  });
+
+  it('shows a toast and leaves dto untouched when the PUT fails', async () => {
+    const store = makeWidenedStore({
+      headerSelectionsBySubgraphId: {
+        'sg-1': {keyValues: {'key-1': 'v1'}, subgraphId: 'sg-1'},
+      },
+      moduleInstances: {
+        [MODULE_ID]: makeModuleInstance({
+          ckvs: [makeCkv('ckv-1', [['key-1', 'v1']])],
+        }),
+      },
+    });
+    const originalDto = makeCalDataDtoWithEnable();
+    store.setState({
+      moduleDataByModuleId: {
+        [MODULE_ID]: {
+          calData: {
+            availableCalIndices: [],
+            dto: originalDto,
+            loadedScope: 'partial',
+            status: 'ready',
+          },
+          moduleName: MODULE_NAME,
+        },
+      },
+    });
+    mockPutCalData.mockResolvedValueOnce({
+      data: undefined,
+      message: 'boom',
+      success: false,
+    });
+
+    await store.getState().setModuleEnable(MODULE_ID, true);
+
+    expect(mockShowToast).toHaveBeenCalledWith('boom', 'danger');
+    const entry = store.getState().moduleDataByModuleId[MODULE_ID];
+    expect(entry.calData?.dto).toBe(originalDto);
   });
 });
 

@@ -317,4 +317,13 @@ describe('ModuleEnableOverlay — ready (State 1)', () => {
       true,
     );
   });
+
+  it('marks the ready-state wrapper as nodrag/nopan so canvas drag does not swallow the toggle', () => {
+    const store = makeReadyStore(false);
+    renderOverlay(store);
+
+    const wrapper = screen.getByTestId('module-enable-overlay-ready');
+    expect(wrapper.className).toContain('nodrag');
+    expect(wrapper.className).toContain('nopan');
+  });
 });
